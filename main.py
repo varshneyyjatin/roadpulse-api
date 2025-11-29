@@ -51,3 +51,11 @@ def read_root():
     Returns a welcome message indicating that the ANPR API service is running.
     """
     return {"message": "Welcome to my FastAPI- ANPR app!"}
+
+@app.get("/health")
+def health_check():
+    """
+    Health check endpoint.
+    Returns the health status of the API service.
+    """
+    return {"status": "healthy", "service": "ANPR API"}

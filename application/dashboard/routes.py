@@ -138,13 +138,13 @@ def get_vehicle_logs(
     # OPTIMIZATION: Pre-fetch all checkpoint IDs from history_data in one query
     from application.database.models.location import MstLocation
     
-    all_checkpoint_ids = set()
-    for log in logs:
-        if log.history_data:
-            for entry in log.history_data:
-                checkpoint_id = entry.get("checkpoint_id")
-                if checkpoint_id:
-                    all_checkpoint_ids.add(checkpoint_id)
+    # OPTIMIZED: Extract checkpoint IDs using set comprehension
+    all_checkpoint_ids = {
+        entry.get("checkpoint_id")
+        for log in logs if log.history_data
+        for entry in log.history_data
+        if entry.get("checkpoint_id")
+    }
     
     # Single query to fetch all checkpoints with locations
     checkpoint_cache = {}
@@ -160,20 +160,29 @@ def get_vehicle_logs(
             MstCheckpoint.checkpoint_id.in_(all_checkpoint_ids)
         ).all()
         
-        for cp in checkpoints:
-            checkpoint_cache[cp.checkpoint_id] = {
+        # OPTIMIZED: Build cache using dict comprehension
+        checkpoint_cache = {
+            cp.checkpoint_id: {
                 "checkpoint_name": cp.name,
                 "location_id": cp.location_id,
                 "location_name": cp.location_name
             }
+            for cp in checkpoints
+        }
     
-    # Format response
+    # Format response - OPTIMIZED
     result = []
+    image_paths = set()  # Collect images while building result
+    
     for log in logs:
         # Determine plate number to display
         display_plate_number = log.plate_number
         if log.is_revised and log.revised_data:
             display_plate_number = log.revised_data.get("new_number", log.plate_number)
+        
+        is_blacklisted = bool(log.is_blacklisted)
+        is_whitelisted = bool(log.is_whitelisted)
+        is_revised = bool(log.is_revised)
         
         # If searching by plate_number, expand history_data into separate rows
         if request.plate_number and log.history_data:
@@ -190,6 +199,12 @@ def get_vehicle_logs(
                 vehicle_image = picture_data.get("VehiclePic", {}).get("Content")
                 plate_image = picture_data.get("CutoutPic", {}).get("Content")
                 
+                # Collect images
+                if vehicle_image:
+                    image_paths.add(vehicle_image)
+                if plate_image:
+                    image_paths.add(plate_image)
+                
                 checkpoint_info = checkpoint_cache.get(checkpoint_id, {})
                 
                 result.append({
@@ -202,12 +217,12 @@ def get_vehicle_logs(
                     "checkpoint_name": checkpoint_info.get("checkpoint_name"),
                     "timestamp": snap_time,
                     "plate_number": display_plate_number,
-                    "is_blacklisted": log.is_blacklisted if log.is_blacklisted else False,
-                    "is_whitelisted": log.is_whitelisted if log.is_whitelisted else False,
+                    "is_blacklisted": is_blacklisted,
+                    "is_whitelisted": is_whitelisted,
                     "latest_data_vehicle_image": vehicle_image,
                     "latest_data_number_plate_image": plate_image,
                     "is_multiple_times": len(log.history_data) > 1,
-                    "is_revised": log.is_revised if log.is_revised else False,
+                    "is_revised": is_revised,
                     "timeline": []
                 })
         else:
@@ -216,6 +231,12 @@ def get_vehicle_logs(
             latest_vehicle_image = picture_data.get("VehiclePic", {}).get("Content")
             latest_plate_image = picture_data.get("CutoutPic", {}).get("Content")
             latest_timestamp = picture_data.get("SnapInfo", {}).get("SnapTime")
+            
+            # Collect images
+            if latest_vehicle_image:
+                image_paths.add(latest_vehicle_image)
+            if latest_plate_image:
+                image_paths.add(latest_plate_image)
             
             # Build timeline from history_data
             timeline = []
@@ -226,6 +247,12 @@ def get_vehicle_logs(
                     snap_time = picture_data.get("SnapInfo", {}).get("SnapTime", "")
                     vehicle_image = picture_data.get("VehiclePic", {}).get("Content")
                     plate_image = picture_data.get("CutoutPic", {}).get("Content")
+                    
+                    # Collect images
+                    if vehicle_image:
+                        image_paths.add(vehicle_image)
+                    if plate_image:
+                        image_paths.add(plate_image)
                     
                     checkpoint_info = checkpoint_cache.get(checkpoint_id, {})
                     timeline.append({
@@ -245,57 +272,46 @@ def get_vehicle_logs(
                 "checkpoint_name": log.checkpoint_name,
                 "timestamp": latest_timestamp,
                 "plate_number": display_plate_number,
-                "is_blacklisted": log.is_blacklisted if log.is_blacklisted else False,
-                "is_whitelisted": log.is_whitelisted if log.is_whitelisted else False,
+                "is_blacklisted": is_blacklisted,
+                "is_whitelisted": is_whitelisted,
                 "latest_data_vehicle_image": latest_vehicle_image,
                 "latest_data_number_plate_image": latest_plate_image,
                 "is_multiple_times": len(log.history_data) > 1 if log.history_data else False,
-                "is_revised": log.is_revised if log.is_revised else False,
+                "is_revised": is_revised,
                 "timeline": timeline
             }
             
             # Add revised_data only if is_revised is True
-            if log.is_revised and log.revised_data:
+            if is_revised and log.revised_data:
                 result_obj["revised_data"] = log.revised_data
             
             result.append(result_obj)
     
-    # Generate presigned URLs for all images
+    # Generate presigned URLs for all images - OPTIMIZED
     storage = get_storage()
-    
-    # Collect all unique image paths
-    image_paths = set()
-    for item in result:
-        if item.get("latest_data_vehicle_image"):
-            image_paths.add(item["latest_data_vehicle_image"])
-        if item.get("latest_data_number_plate_image"):
-            image_paths.add(item["latest_data_number_plate_image"])
-        
-        # Timeline images
-        for timeline_entry in item.get("timeline", []):
-            if timeline_entry.get("vehicle_image"):
-                image_paths.add(timeline_entry["vehicle_image"])
-            if timeline_entry.get("number_plate_image"):
-                image_paths.add(timeline_entry["number_plate_image"])
-    
-    # Generate presigned URLs in batch
     presigned_urls = storage.generate_presigned_urls_batch(list(image_paths), expiration=3600)
     
-    # Replace image paths with presigned URLs
+    # Replace image paths with presigned URLs - OPTIMIZED
     for item in result:
-        if item.get("latest_data_vehicle_image"):
-            item["latest_data_vehicle_image"] = presigned_urls.get(item["latest_data_vehicle_image"])
-        if item.get("latest_data_number_plate_image"):
-            item["latest_data_number_plate_image"] = presigned_urls.get(item["latest_data_number_plate_image"])
+        vehicle_img = item.get("latest_data_vehicle_image")
+        plate_img = item.get("latest_data_number_plate_image")
+        
+        if vehicle_img:
+            item["latest_data_vehicle_image"] = presigned_urls.get(vehicle_img)
+        if plate_img:
+            item["latest_data_number_plate_image"] = presigned_urls.get(plate_img)
         
         # Timeline images
         for timeline_entry in item.get("timeline", []):
-            if timeline_entry.get("vehicle_image"):
-                timeline_entry["vehicle_image"] = presigned_urls.get(timeline_entry["vehicle_image"])
-            if timeline_entry.get("number_plate_image"):
-                timeline_entry["number_plate_image"] = presigned_urls.get(timeline_entry["number_plate_image"])
+            v_img = timeline_entry.get("vehicle_image")
+            p_img = timeline_entry.get("number_plate_image")
+            
+            if v_img:
+                timeline_entry["vehicle_image"] = presigned_urls.get(v_img)
+            if p_img:
+                timeline_entry["number_plate_image"] = presigned_urls.get(p_img)
     
-    logger.info(f"Vehicle Logs Response :: UserID -> {user_id} :: Scope -> {request.scope} :: TotalVehicles -> {summary['total_vehicles']} :: TotalLocations -> {summary['total_locations']} :: TotalCameras -> {summary['total_cameras']} :: BlacklistedVehicles -> {summary['blacklisted_vehicle_count']} :: MultipleDetections -> {summary['multiple_detections_count']} :: TotalLogs -> {len(result)} :: PresignedURLs -> {len(presigned_urls)}")
+    logger.info(f"Vehicle Logs Response :: UserID -> {user_id} :: Scope -> {request.scope} :: TotalVehicles -> {summary['total_vehicles']} :: TotalLogs -> {len(result)} :: PresignedURLs -> {len(presigned_urls)}")
     
     return {
         "total_vehicles": summary["total_vehicles"],
