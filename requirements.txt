@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2
+bcrypt==4.0.1
+pyjwt
+python-jose
+python-dotenv
+pytz
+requests
+pydantic[email]
+jinja2
+openpyxl
+python-multipart
+python-dateutil
+schedule
+boto3
