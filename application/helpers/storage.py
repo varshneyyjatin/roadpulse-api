@@ -4,6 +4,7 @@ S3/MinIO Storage Helper for generating presigned URLs.
 import boto3
 from botocore.exceptions import ClientError
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from application.helpers.logger import get_logger
 import config
 
@@ -55,9 +56,27 @@ class S3Storage:
             logger.error(f"Unexpected error generating presigned URL :: Key -> {object_key} :: Error -> {str(e)}")
             return None
     
+    def _generate_single_url(self, key: str, expiration: int) -> tuple[str, Optional[str]]:
+        """Helper to generate single presigned URL."""
+        if not key:
+            return (key, None)
+        try:
+            url = self.s3_client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': self.bucket_name,
+                    'Key': key
+                },
+                ExpiresIn=expiration
+            )
+            return (key, url)
+        except Exception as e:
+            logger.error(f"Error generating presigned URL :: Key -> {key} :: Error -> {str(e)}")
+            return (key, None)
+    
     def generate_presigned_urls_batch(self, object_keys: list[str], expiration: int = 3600) -> dict[str, Optional[str]]:
         """
-        Generate presigned URLs for multiple objects.
+        Generate presigned URLs for multiple objects - PARALLEL OPTIMIZED.
         
         Args:
             object_keys: List of S3 object keys
@@ -66,12 +85,24 @@ class S3Storage:
         Returns:
             Dictionary mapping object keys to presigned URLs
         """
+        if not object_keys:
+            return {}
+        
         result = {}
-        for key in object_keys:
-            if key:  # Skip None or empty keys
-                result[key] = self.generate_presigned_url(key, expiration)
-            else:
-                result[key] = None
+        
+        # Use ThreadPoolExecutor for parallel URL generation
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = {executor.submit(self._generate_single_url, key, expiration): key for key in object_keys}
+            
+            for future in as_completed(futures):
+                try:
+                    key, url = future.result()
+                    result[key] = url
+                except Exception as e:
+                    original_key = futures[future]
+                    logger.error(f"Failed to generate URL :: Key -> {original_key} :: Error -> {str(e)}")
+                    result[original_key] = None
+        
         return result
 
 
