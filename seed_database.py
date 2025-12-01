@@ -204,7 +204,6 @@ def create_cameras(db: Session, checkpoints, locations):
                 camera_model="Hikvision DS-2CD2T47G2-L",
                 fps=25,
                 ip_address=f"192.168.1.{100 + camera_counter}",
-                rtsp_url=f"rtsp://admin:admin123@192.168.1.{100 + camera_counter}:554/stream1",
                 username="admin",
                 password_hash="admin123",
                 disabled=False,

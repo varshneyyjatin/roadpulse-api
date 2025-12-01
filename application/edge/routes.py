@@ -93,11 +93,10 @@ def get_company_details_by_mac(
                 CameraConfigSchema(
                     camera_id=camera.camera_id,
                     compute_box_id=camera.box_id,
-                    camera_ip_add=camera.ip_address,
-                    box_ip_add=compute_box.ip_address,
+                    camera_ip_add=camera.ip_address or "",
+                    box_ip_add=compute_box.ip_address or "",
                     roi=camera.roi,
-                    rtsp_url=camera.rtsp_url,
-                    camera_name=camera.camera_name,
+                    camera_name=camera.camera_name or "",
                     user_name=camera.username,
                     password=camera.password_hash
                 )

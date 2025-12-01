@@ -53,7 +53,6 @@ def get_checkpoints_with_cameras(
                 MstCamera.box_id,
                 MstCamera.ip_address,
                 MstCamera.roi,
-                MstCamera.rtsp_url,
                 MstCamera.camera_name,
                 MstCamera.username,
                 MstCamera.password_hash,

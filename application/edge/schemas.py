@@ -6,13 +6,12 @@ from pydantic import BaseModel
 from datetime import datetime
 
 class CameraConfigSchema(BaseModel):
-    """Camera configuration with network details, RTSP connection, and ROI settings."""
+    """Camera configuration with network details and ROI settings."""
     camera_id: int
     compute_box_id: int
     camera_ip_add: str
     box_ip_add: str
     roi: Optional[Dict] = None
-    rtsp_url: Optional[str] = None
     camera_name: str
     user_name: Optional[str] = None
     password: Optional[str] = None
