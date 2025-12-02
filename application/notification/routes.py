@@ -106,10 +106,13 @@ def get_notifications(
     )
     
     try:
+        # Creator can see all companies, others only their company
+        filter_company_id = None if current_user.role == 'creator' else company_id
+        
         notifications = crud.get_user_notifications(
             db=db,
             user_id=user_id,
-            company_id=company_id,
+            company_id=filter_company_id,
             is_read=request.is_read,
             notification_type=request.notification_type,
             limit=request.limit
@@ -214,10 +217,13 @@ def get_unread_count(
     company_id = current_user.company_id
     
     try:
+        # Creator can see all companies, others only their company
+        filter_company_id = None if current_user.role == 'creator' else company_id
+        
         count = crud.get_unread_count(
             db=db,
             user_id=user_id,
-            company_id=company_id
+            company_id=filter_company_id
         )
         
         logger.info(f"Unread Count :: UserID -> {user_id} :: Count -> {count}")
@@ -302,10 +308,13 @@ def get_my_notifications(
         )
         
         # Get notifications with location-based filtering
+        # Creator can see all companies, others only their company
+        filter_company_id = None if current_user.role == 'creator' else company_id
+        
         notifications = crud.get_user_notifications_with_access(
             db=db,
             user_id=user_id,
-            company_id=company_id,
+            company_id=filter_company_id,
             accessible_location_ids=accessible_location_ids,
             has_all_locations_access=has_all_locations_access,
             is_read=is_read,

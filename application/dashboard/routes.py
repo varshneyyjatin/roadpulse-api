@@ -46,7 +46,13 @@ def get_vehicle_logs(
         }
     
     # Extract accessible locations and checkpoints from access control
-    access_info = utils.extract_accessible_locations_checkpoints(access_entries)
+    # Pass db, company_id, and role for company filtering
+    access_info = utils.extract_accessible_locations_checkpoints(
+        access_entries, 
+        db=db, 
+        company_id=current_user.company_id, 
+        role=current_user.role
+    )
     user_location_ids = access_info["location_ids"]
     user_checkpoint_ids = access_info["checkpoint_ids"]
     

@@ -8,13 +8,15 @@ from application.database.models.checkpoint import MstCheckpoint
 from application.database.models.location import MstLocation
 
 
-def get_user_assigned_locations(db: Session, user_id: int) -> List[int]:
+def get_user_assigned_locations(db: Session, user_id: int, company_id: int, role: str) -> List[int]:
     """
     Get all location IDs assigned to a user from access control.
     
     Args:
         db: Database session
         user_id: User ID
+        company_id: User's company ID
+        role: User's role
         
     Returns:
         List of location IDs (empty list if no access, or all locations if NULL access_data)
@@ -37,13 +39,19 @@ def get_user_assigned_locations(db: Session, user_id: int) -> List[int]:
     # Check if user has access to ALL locations (NULL access_data)
     for access in location_accesses:
         if access.access_data is None:
-            # NULL means ALL locations
-            all_locations = db.query(MstLocation.location_id).filter(
+            # NULL means ALL locations - but filter by company for non-creator roles
+            query = db.query(MstLocation.location_id).filter(
                 and_(
                     MstLocation.disabled == False,
                     MstLocation.is_deleted == False
                 )
-            ).all()
+            )
+            
+            # Non-creator roles see only their company's locations
+            if role != 'creator':
+                query = query.filter(MstLocation.company_id == company_id)
+            
+            all_locations = query.all()
             return [loc[0] for loc in all_locations]
     
     # Extract specific location IDs from JSON
@@ -56,6 +64,18 @@ def get_user_assigned_locations(db: Session, user_id: int) -> List[int]:
                 location_ids.extend(ids)
             except:
                 continue
+    
+    # Filter location IDs by company for non-creator roles
+    if location_ids and role != 'creator':
+        valid_locations = db.query(MstLocation.location_id).filter(
+            and_(
+                MstLocation.location_id.in_(location_ids),
+                MstLocation.company_id == company_id,
+                MstLocation.disabled == False,
+                MstLocation.is_deleted == False
+            )
+        ).all()
+        location_ids = [loc[0] for loc in valid_locations]
     
     return list(set(location_ids))  # Remove duplicates
 
