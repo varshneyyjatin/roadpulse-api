@@ -168,7 +168,7 @@ def create_checkpoints(db: Session, locations):
         checkpoint = MstCheckpoint(
             location_id=location.location_id,
             name=data["name"],
-            description=data["description"],
+            # description=data["description"],
             checkpoint_type=data["type"],
             latitude=28.6692 if data["location_idx"] == 0 else 19.0330,  # Delhi/Mumbai coords
             longitude=77.1510 if data["location_idx"] == 0 else 73.0297,
