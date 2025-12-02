@@ -38,19 +38,35 @@ def get_watchlist(
         }
     
     # Extract accessible locations and checkpoints
-    access_info = utils.extract_accessible_locations_checkpoints(access_entries)
+    # Pass db, company_id, and role for company filtering
+    access_info = utils.extract_accessible_locations_checkpoints(
+        access_entries,
+        db=db,
+        company_id=current_user.company_id,
+        role=current_user.role
+    )
     location_ids = access_info["location_ids"]
     checkpoint_ids = access_info["checkpoint_ids"]
     
     logger.info(f"Watchlist Access :: UserID -> {user_id} :: CompanyID -> {current_user.company_id} :: LocationIDs -> {location_ids} :: CheckpointIDs -> {checkpoint_ids}")
     
-    # Get watchlist entries
-    watchlist_entries = crud.get_watchlist_by_access(
-        db,
-        company_id=current_user.company_id,
-        location_ids=location_ids,
-        checkpoint_ids=checkpoint_ids
-    )
+    # Get watchlist entries - filter by company for non-creator roles
+    if current_user.role == 'creator':
+        # Creator can see all companies
+        watchlist_entries = crud.get_watchlist_by_access(
+            db,
+            company_id=None,  # All companies
+            location_ids=location_ids,
+            checkpoint_ids=checkpoint_ids
+        )
+    else:
+        # Other roles see only their company
+        watchlist_entries = crud.get_watchlist_by_access(
+            db,
+            company_id=current_user.company_id,
+            location_ids=location_ids,
+            checkpoint_ids=checkpoint_ids
+        )
     
     # Format response
     result = []

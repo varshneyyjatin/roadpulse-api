@@ -153,7 +153,7 @@ def create_notification_tracker(
 def get_user_notifications(
     db: Session,
     user_id: int,
-    company_id: int,
+    company_id: Optional[int] = None,
     is_read: Optional[bool] = None,
     notification_type: Optional[str] = None,
     limit: int = 50
@@ -164,7 +164,7 @@ def get_user_notifications(
     Args:
         db: Database session
         user_id: User ID
-        company_id: Company ID
+        company_id: Company ID (None for all companies - creator only)
         is_read: Filter by read status (None for all)
         notification_type: Filter by notification type
         limit: Maximum number of results
@@ -172,6 +172,24 @@ def get_user_notifications(
     Returns:
         List of (notification, tracker) tuples
     """
+    # Build base filters
+    filters = [
+        MstNotification.disabled == False,
+        MstNotification.is_deleted == False,
+        or_(
+            MstNotification.expires_at.is_(None),
+            MstNotification.expires_at > datetime.utcnow()
+        ),
+        or_(
+            MstNotification.user_id == user_id,
+            MstNotification.user_id.is_(None)
+        )
+    ]
+    
+    # Add company filter if specified (non-creator roles)
+    if company_id is not None:
+        filters.append(MstNotification.company_id == company_id)
+    
     query = db.query(
         MstNotification,
         TrnNotificationTracker
@@ -181,21 +199,7 @@ def get_user_notifications(
             MstNotification.notification_id == TrnNotificationTracker.notification_id,
             TrnNotificationTracker.user_id == user_id
         )
-    ).filter(
-        and_(
-            MstNotification.disabled == False,
-            MstNotification.is_deleted == False,
-            or_(
-                MstNotification.expires_at.is_(None),
-                MstNotification.expires_at > datetime.utcnow()
-            ),
-            or_(
-                MstNotification.user_id == user_id,
-                MstNotification.user_id.is_(None)
-            ),
-            MstNotification.company_id == company_id
-        )
-    )
+    ).filter(and_(*filters))
     
     # Filter by read status
     if is_read is not None:
@@ -272,43 +276,47 @@ def mark_notifications_as_read(
     return count
 
 
-def get_unread_count(db: Session, user_id: int, company_id: int) -> int:
+def get_unread_count(db: Session, user_id: int, company_id: Optional[int] = None) -> int:
     """
     Get count of unread notifications for a user.
     
     Args:
         db: Database session
         user_id: User ID
-        company_id: Company ID
+        company_id: Company ID (None for all companies - creator only)
         
     Returns:
         Count of unread notifications
     """
+    # Build base filters
+    filters = [
+        MstNotification.disabled == False,
+        MstNotification.is_deleted == False,
+        or_(
+            MstNotification.expires_at.is_(None),
+            MstNotification.expires_at > datetime.utcnow()
+        ),
+        or_(
+            MstNotification.user_id == user_id,
+            MstNotification.user_id.is_(None)
+        ),
+        or_(
+            TrnNotificationTracker.is_read == False,
+            TrnNotificationTracker.is_read.is_(None)
+        )
+    ]
+    
+    # Add company filter if specified (non-creator roles)
+    if company_id is not None:
+        filters.append(MstNotification.company_id == company_id)
+    
     count = db.query(func.count(MstNotification.notification_id)).outerjoin(
         TrnNotificationTracker,
         and_(
             MstNotification.notification_id == TrnNotificationTracker.notification_id,
             TrnNotificationTracker.user_id == user_id
         )
-    ).filter(
-        and_(
-            MstNotification.disabled == False,
-            MstNotification.is_deleted == False,
-            or_(
-                MstNotification.expires_at.is_(None),
-                MstNotification.expires_at > datetime.utcnow()
-            ),
-            or_(
-                MstNotification.user_id == user_id,
-                MstNotification.user_id.is_(None)
-            ),
-            MstNotification.company_id == company_id,
-            or_(
-                TrnNotificationTracker.is_read == False,
-                TrnNotificationTracker.is_read.is_(None)
-            )
-        )
-    ).scalar()
+    ).filter(and_(*filters)).scalar()
     
     return count or 0
 
@@ -316,9 +324,9 @@ def get_unread_count(db: Session, user_id: int, company_id: int) -> int:
 def get_user_notifications_with_access(
     db: Session,
     user_id: int,
-    company_id: int,
-    accessible_location_ids: List[int],
-    has_all_locations_access: bool,
+    company_id: Optional[int] = None,
+    accessible_location_ids: List[int] = None,
+    has_all_locations_access: bool = False,
     is_read: Optional[bool] = None,
     notification_type: Optional[str] = None,
     limit: int = 50
@@ -333,7 +341,7 @@ def get_user_notifications_with_access(
     Args:
         db: Database session
         user_id: User ID
-        company_id: Company ID
+        company_id: Company ID (None for all companies - creator only)
         accessible_location_ids: List of location IDs user has access to
         has_all_locations_access: Whether user has access to all locations
         is_read: Filter by read status (None for all)
@@ -343,6 +351,20 @@ def get_user_notifications_with_access(
     Returns:
         List of (notification, tracker) tuples
     """
+    # Build base filters
+    filters = [
+        MstNotification.disabled == False,
+        MstNotification.is_deleted == False,
+        or_(
+            MstNotification.expires_at.is_(None),
+            MstNotification.expires_at > datetime.utcnow()
+        )
+    ]
+    
+    # Add company filter if specified (non-creator roles)
+    if company_id is not None:
+        filters.append(MstNotification.company_id == company_id)
+    
     query = db.query(
         MstNotification,
         TrnNotificationTracker
@@ -352,17 +374,7 @@ def get_user_notifications_with_access(
             MstNotification.notification_id == TrnNotificationTracker.notification_id,
             TrnNotificationTracker.user_id == user_id
         )
-    ).filter(
-        and_(
-            MstNotification.disabled == False,
-            MstNotification.is_deleted == False,
-            or_(
-                MstNotification.expires_at.is_(None),
-                MstNotification.expires_at > datetime.utcnow()
-            ),
-            MstNotification.company_id == company_id
-        )
-    )
+    ).filter(and_(*filters))
     
     # Filter by user access:
     # 1. User-specific notifications (user_id = user_id)

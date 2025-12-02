@@ -88,7 +88,7 @@ def get_assigned_resources(
     
     try:
         # Get user's assigned locations from access control
-        location_ids = crud.get_user_assigned_locations(db, user_id)
+        location_ids = crud.get_user_assigned_locations(db, user_id, current_user.company_id, current_user.role)
         
         if not location_ids:
             logger.warning(

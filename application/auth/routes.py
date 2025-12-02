@@ -202,7 +202,7 @@ def get_user_access_control(
     # Separate checkpoint accesses
     checkpoint_accesses = [a for a in access_entries if a.access_type == 'checkpoint']
     
-    # Get accessible locations
+    # Get accessible locations - filter by company for non-creator roles
     location_ids_list = []
     has_all_locations = False
     for entry in location_accesses:
@@ -212,16 +212,21 @@ def get_user_access_control(
             break
         location_ids_list.extend(ids)
     
+    # Base location query with company filter for non-creator roles
+    location_query = db.query(MstLocation).filter(
+        MstLocation.disabled == False,
+        MstLocation.is_deleted == False
+    )
+    
+    # If not creator role, restrict to user's company only
+    if current_user.role != 'creator':
+        location_query = location_query.filter(MstLocation.company_id == current_user.company_id)
+    
     if has_all_locations:
-        accessible_locations = db.query(MstLocation).filter(
-            MstLocation.disabled == False,
-            MstLocation.is_deleted == False
-        ).all()
+        accessible_locations = location_query.all()
     else:
-        accessible_locations = db.query(MstLocation).filter(
-            MstLocation.location_id.in_(location_ids_list),
-            MstLocation.disabled == False,
-            MstLocation.is_deleted == False
+        accessible_locations = location_query.filter(
+            MstLocation.location_id.in_(location_ids_list)
         ).all()
     
     # Get accessible checkpoints
@@ -235,16 +240,22 @@ def get_user_access_control(
             break
         checkpoint_ids_list.extend(ids)
     
+    # Base checkpoint query
+    checkpoint_query = db.query(MstCheckpoint).filter(
+        MstCheckpoint.disabled == False,
+        MstCheckpoint.is_deleted == False
+    )
+    
+    # If not creator role, restrict to accessible locations only (which are already filtered by company)
+    if current_user.role != 'creator':
+        accessible_location_ids = [loc.location_id for loc in accessible_locations]
+        checkpoint_query = checkpoint_query.filter(MstCheckpoint.location_id.in_(accessible_location_ids))
+    
     if has_all_checkpoints:
-        accessible_checkpoints = db.query(MstCheckpoint).filter(
-            MstCheckpoint.disabled == False,
-            MstCheckpoint.is_deleted == False
-        ).all()
+        accessible_checkpoints = checkpoint_query.all()
     elif checkpoint_ids_list:
-        accessible_checkpoints = db.query(MstCheckpoint).filter(
-            MstCheckpoint.checkpoint_id.in_(checkpoint_ids_list),
-            MstCheckpoint.disabled == False,
-            MstCheckpoint.is_deleted == False
+        accessible_checkpoints = checkpoint_query.filter(
+            MstCheckpoint.checkpoint_id.in_(checkpoint_ids_list)
         ).all()
     else:
         accessible_checkpoints = []

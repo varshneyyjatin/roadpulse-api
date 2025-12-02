@@ -9,23 +9,23 @@ from application.database.models.transactions.vehicle_log import TrnVehicleLog
 
 def get_watchlist_by_access(
     db: Session,
-    company_id: int,
+    company_id: Optional[int] = None,
     location_ids: Optional[List[int]] = None,
     checkpoint_ids: Optional[List[int]] = None
 ):
     """
-    Get watchlist entries for a company.
+    Get watchlist entries for a company or all companies.
     
     Args:
         db: Database session
-        company_id: Company ID to filter watchlist
+        company_id: Company ID to filter watchlist (None for all companies - creator only)
         location_ids: List of accessible location IDs (not used for filtering, kept for future)
         checkpoint_ids: List of accessible checkpoint IDs (not used for filtering, kept for future)
         
     Returns:
-        List of watchlist entries with vehicle details for the company
+        List of watchlist entries with vehicle details
     """
-    # Get all watchlist entries for the company with updated schema
+    # Get watchlist entries with updated schema
     query = db.query(
         MstWatchlist.id,
         MstWatchlist.vehicle_id,
@@ -40,11 +40,14 @@ def get_watchlist_by_access(
     ).join(
         MstVehicle, MstWatchlist.vehicle_id == MstVehicle.vehicle_id
     ).filter(
-        MstWatchlist.is_deleted == False,
-        MstWatchlist.company_id == company_id
-    ).order_by(
-        MstWatchlist.id.desc()
+        MstWatchlist.is_deleted == False
     )
+    
+    # Filter by company if specified (non-creator roles)
+    if company_id is not None:
+        query = query.filter(MstWatchlist.company_id == company_id)
+    
+    query = query.order_by(MstWatchlist.id.desc())
     
     return query.all()
 
