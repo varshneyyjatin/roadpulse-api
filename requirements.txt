@@ -16,3 +16,4 @@ python-dateutil
 schedule
 boto3
 colorama
+pillow

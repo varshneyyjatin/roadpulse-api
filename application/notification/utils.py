@@ -7,7 +7,6 @@ from application.helpers.logger import get_logger
 
 logger = get_logger("notification_utils")
 
-
 def send_watchlist_alert(
     db: Session,
     company_id: int,
@@ -16,11 +15,12 @@ def send_watchlist_alert(
     plate_number: str,
     is_blacklisted: bool,
     is_whitelisted: bool,
+    location_name: Optional[str] = None,
+    checkpoint_id: Optional[int] = None,
     checkpoint_name: Optional[str] = None,
     timestamp: Optional[str] = None,
     vehicle_image: Optional[str] = None,
-    plate_image: Optional[str] = None,
-    vehicle_data: Optional[Dict[str, Any]] = None
+    plate_image: Optional[str] = None
 ) -> int:
     """
     Send watchlist alert notification to users with access to the location.
@@ -33,11 +33,12 @@ def send_watchlist_alert(
         plate_number: Vehicle plate number
         is_blacklisted: Whether vehicle is blacklisted
         is_whitelisted: Whether vehicle is whitelisted
+        location_name: Location name (optional)
+        checkpoint_id: Checkpoint ID (optional)
         checkpoint_name: Checkpoint name (optional)
         timestamp: Detection timestamp (optional)
         vehicle_image: Vehicle snapshot image path (optional)
         plate_image: Number plate image path (optional)
-        vehicle_data: Additional vehicle detection data (optional)
         
     Returns:
         Number of notifications created
@@ -93,11 +94,13 @@ def send_watchlist_alert(
     
     message = " ".join(message_parts) + f". {action_text}."
     
-    # Context data with vehicle images and details
+    # Context data - minimal and clean
     context_data = {
         "vehicle_id": vehicle_id,
         "plate_number": plate_number,
         "location_id": location_id,
+        "location_name": location_name,
+        "checkpoint_id": checkpoint_id,
         "checkpoint_name": checkpoint_name,
         "timestamp": timestamp,
         "is_blacklisted": is_blacklisted,
@@ -106,17 +109,13 @@ def send_watchlist_alert(
         "plate_image": plate_image
     }
     
-    # Add vehicle data if provided
-    if vehicle_data:
-        context_data["vehicle_data"] = vehicle_data
-    
     logger.info(
         f"Context Data :: VehicleImage -> {vehicle_image} :: "
-        f"PlateImage -> {plate_image} :: HasVehicleData -> {vehicle_data is not None}"
+        f"PlateImage -> {plate_image}"
     )
     
-    # Set expiration (24 hours from now)
-    expires_at = datetime.utcnow() + timedelta(hours=24)
+    # Watchlist alerts don't expire - set expires_at to None
+    expires_at = None
     
     # Create ONE broadcast notification
     try:

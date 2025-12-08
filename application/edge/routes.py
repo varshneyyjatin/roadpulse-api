@@ -278,18 +278,21 @@ async def vehicle_detection(payload: VehicleDetectionRequest, db: Session = Depe
             log_id = new_log.log_id
             log_status = "created"
         
-        # Step 4: Send notification (only for new logs with watchlist entries)
+        # Step 4: Send notification (every time for watchlist entries)
         notification_sent = False
         notification_count = None
         
-        if log_status == "created" and watchlist_entry and (is_blacklisted or is_whitelisted):
+        if watchlist_entry and (is_blacklisted or is_whitelisted):
             # Get checkpoint and location details
             checkpoint_name = None
             company_id = None
             
-            if payload.checkpoint_id:
+            # Get checkpoint_id from data_with_checkpoint (priority) or payload
+            checkpoint_id_to_use = data_with_checkpoint.get("checkpoint_id") or payload.checkpoint_id
+            
+            if checkpoint_id_to_use:
                 checkpoint = db.query(MstCheckpoint).filter(
-                    MstCheckpoint.checkpoint_id == payload.checkpoint_id
+                    MstCheckpoint.checkpoint_id == checkpoint_id_to_use
                 ).first()
                 if checkpoint:
                     checkpoint_name = checkpoint.name
@@ -297,8 +300,11 @@ async def vehicle_detection(payload: VehicleDetectionRequest, db: Session = Depe
             location = db.query(MstLocation).filter(
                 MstLocation.location_id == payload.location_id
             ).first()
+            
+            location_name = None
             if location:
                 company_id = location.company_id
+                location_name = location.location_name
             
             if company_id:
                 try:
@@ -316,15 +322,16 @@ async def vehicle_detection(payload: VehicleDetectionRequest, db: Session = Depe
                         db=db,
                         company_id=company_id,
                         location_id=payload.location_id,
+                        location_name=location_name,
+                        checkpoint_id=checkpoint_id_to_use,
+                        checkpoint_name=checkpoint_name,
                         vehicle_id=vehicle.vehicle_id,
                         plate_number=vehicle.plate_number,
                         is_blacklisted=is_blacklisted,
                         is_whitelisted=is_whitelisted,
-                        checkpoint_name=checkpoint_name,
                         timestamp=payload.timestamp,
                         vehicle_image=vehicle_image,
-                        plate_image=plate_image,
-                        vehicle_data=data_with_checkpoint
+                        plate_image=plate_image
                     )
                     notification_sent = True
                     logger.info(

@@ -77,7 +77,8 @@ def get_vehicle_logs_with_blacklist(
     is_blacklisted: Optional[bool] = None,
     is_whitelisted: Optional[bool] = None,
     plate_number: Optional[str] = None,
-    limit: int = 1000
+    page: int = 1,
+    page_size: int = 50
 ):
     """
     HIGHLY OPTIMIZED: Get vehicle logs with blacklist status in single query.
@@ -92,7 +93,8 @@ def get_vehicle_logs_with_blacklist(
         is_blacklisted: Filter by blacklisted status (None means all)
         is_whitelisted: Filter by whitelisted status (None means all)
         plate_number: Filter by vehicle plate number (None means all)
-        limit: Maximum number of records to return (default 1000)
+        page: Page number (starts from 1)
+        page_size: Number of records per page
         
     Returns:
         List of vehicle logs with blacklist status
@@ -101,8 +103,11 @@ def get_vehicle_logs_with_blacklist(
     
     # Build filter conditions
     filters = []
-    if location_ids is not None:
-        filters.append(TrnVehicleLog.location_id.in_(location_ids))
+    
+    # NOTE: We will filter by checkpoint's location (from latest_data), not TrnVehicleLog.location_id
+    # TrnVehicleLog.location_id is the first detection location, not the latest
+    # Location filtering will be done via checkpoint_ids parameter
+    
     if start_date:
         start_datetime = datetime.combine(start_date, datetime.min.time())
         filters.append(TrnVehicleLog.timestamp >= start_datetime)
@@ -156,6 +161,14 @@ def get_vehicle_logs_with_blacklist(
     if filters:
         query = query.filter(and_(*filters))
     
+    # IMPORTANT: Filter by checkpoint (which filters by latest location, not first location)
+    if checkpoint_ids is not None:
+        if len(checkpoint_ids) == 0:
+            # Empty list means no access - return empty list
+            return []
+        # Filter by checkpoint_id from latest_data (via MstCheckpoint join)
+        query = query.filter(MstCheckpoint.checkpoint_id.in_(checkpoint_ids))
+    
     # Apply watchlist filters if provided
     if is_blacklisted is not None:
         if is_blacklisted:
@@ -177,8 +190,11 @@ def get_vehicle_logs_with_blacklist(
                 (MstWatchlist.is_whitelisted == False) | (MstWatchlist.is_whitelisted.is_(None))
             )
     
-    # Order by indexed column and limit results
-    query = query.order_by(TrnVehicleLog.timestamp.desc()).limit(limit)
+    # Calculate offset for pagination
+    offset = (page - 1) * page_size
+    
+    # Order by indexed column and apply pagination
+    query = query.order_by(TrnVehicleLog.timestamp.desc()).offset(offset).limit(page_size)
     
     return query.all()
 
@@ -205,31 +221,38 @@ def get_summary_counts(
         today_only: Not used anymore, kept for compatibility
         
     Returns:
-        Dict with total vehicles (from date range), total locations (assigned), total cameras (assigned), blacklisted vehicles (from date range), multiple detections count
+        Dict with:
+        - total_vehicles: Unique vehicles in date range
+        - total_locations: Total accessible locations (static)
+        - total_cameras: Total accessible cameras (static)
+        - blacklisted_vehicle_count: Blacklisted vehicles in date range
+        - multiple_detections_count: Vehicles with multiple detections in date range
     """
     from sqlalchemy import func, select, and_, case
     
-    # Build filter conditions once
+    # ===== BUILD FILTERS FOR DATE RANGE =====
     filters = []
+    
+    # Date filters
     if start_date:
         start_datetime = datetime.combine(start_date, datetime.min.time())
         filters.append(TrnVehicleLog.timestamp >= start_datetime)
-    
     if end_date:
         end_datetime = datetime.combine(end_date, datetime.max.time())
         filters.append(TrnVehicleLog.timestamp <= end_datetime)
     
+    # Location filter
     if location_ids is not None:
         filters.append(TrnVehicleLog.location_id.in_(location_ids))
     
-    # SUPER OPTIMIZED: Single CTE query for both counts
-    # Create subquery for distinct vehicle IDs
+    # ===== TOTAL VEHICLES & BLACKLISTED COUNT (WITH DATE FILTER) =====
+    # Get unique vehicles in date range
     vehicle_subquery = select(TrnVehicleLog.vehicle_id).distinct()
     if filters:
         vehicle_subquery = vehicle_subquery.where(and_(*filters))
     vehicle_subquery = vehicle_subquery.subquery()
     
-    # Single query to get both counts using the subquery
+    # Single query to get both total and blacklisted counts
     counts = db.query(
         func.count(vehicle_subquery.c.vehicle_id).label('total_vehicles'),
         func.count(MstWatchlist.vehicle_id).label('blacklisted_count')
@@ -247,7 +270,8 @@ def get_summary_counts(
     total_vehicles = counts.total_vehicles if counts else 0
     blacklisted_count = counts.blacklisted_count if counts else 0
     
-    # Count vehicles with multiple detections (history_data length > 1)
+    # ===== MULTIPLE DETECTIONS COUNT (WITH DATE FILTER) =====
+    # Count vehicles with multiple detections in date range
     multiple_detections_query = db.query(
         func.count().label('multiple_count')
     ).select_from(TrnVehicleLog)
@@ -291,6 +315,278 @@ def get_summary_counts(
     }
 
 
+def get_vehicle_logs_count(
+    db: Session,
+    company_id: int,
+    location_ids: List[int] = None,
+    checkpoint_ids: List[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    is_blacklisted: Optional[bool] = None,
+    is_whitelisted: Optional[bool] = None,
+    plate_number: Optional[str] = None
+) -> int:
+    """
+    Get total count of vehicle logs matching the filters.
+    When plate_number is provided, counts history_data entries instead of log records.
+    
+    Args:
+        db: Database session
+        company_id: Company ID for blacklist check
+        location_ids: List of location IDs (None means all)
+        checkpoint_ids: List of checkpoint IDs (None means all)
+        start_date: Start date for filtering (None means no start limit)
+        end_date: End date for filtering (None means no end limit)
+        is_blacklisted: Filter by blacklisted status (None means all)
+        is_whitelisted: Filter by whitelisted status (None means all)
+        plate_number: Filter by vehicle plate number (None means all)
+        
+    Returns:
+        Total count of matching records (history_data entries if plate_number provided, else log records)
+    """
+    from sqlalchemy import and_, func, cast, Integer, text
+    
+    # Build filter conditions
+    filters = []
+    
+    # Handle location_ids: None means all, empty list means no access
+    if location_ids is not None:
+        if len(location_ids) == 0:
+            # Empty list means no access - return 0
+            return 0
+        filters.append(TrnVehicleLog.location_id.in_(location_ids))
+    
+    if start_date:
+        start_datetime = datetime.combine(start_date, datetime.min.time())
+        filters.append(TrnVehicleLog.timestamp >= start_datetime)
+    if end_date:
+        end_datetime = datetime.combine(end_date, datetime.max.time())
+        filters.append(TrnVehicleLog.timestamp <= end_datetime)
+    
+    # Build count query with same filters as main query
+    query = db.query(TrnVehicleLog).join(
+        MstVehicle, TrnVehicleLog.vehicle_id == MstVehicle.vehicle_id
+    ).outerjoin(
+        MstCheckpoint,
+        MstCheckpoint.checkpoint_id == cast(TrnVehicleLog.latest_data.op('->>')(text("'checkpoint_id'")), Integer)
+    ).outerjoin(
+        MstLocation, MstCheckpoint.location_id == MstLocation.location_id
+    ).outerjoin(
+        MstWatchlist,
+        and_(
+            TrnVehicleLog.vehicle_id == MstWatchlist.vehicle_id,
+            MstWatchlist.company_id == company_id,
+            MstWatchlist.is_deleted == False,
+            MstWatchlist.disabled == False
+        )
+    )
+    
+    # Apply plate number filter if provided
+    if plate_number:
+        plate_number_upper = plate_number.strip().upper()
+        filters.append(MstVehicle.plate_number == plate_number_upper)
+    
+    # Apply all filters at once
+    if filters:
+        query = query.filter(and_(*filters))
+    
+    # Apply watchlist filters if provided
+    if is_blacklisted is not None:
+        if is_blacklisted:
+            query = query.filter(MstWatchlist.is_blacklisted == True)
+        else:
+            query = query.filter(
+                (MstWatchlist.is_blacklisted == False) | (MstWatchlist.is_blacklisted.is_(None))
+            )
+    
+    if is_whitelisted is not None:
+        if is_whitelisted:
+            query = query.filter(MstWatchlist.is_whitelisted == True)
+        else:
+            query = query.filter(
+                (MstWatchlist.is_whitelisted == False) | (MstWatchlist.is_whitelisted.is_(None))
+            )
+    
+    # If plate_number is provided, count history_data entries instead of log records
+    if plate_number:
+        logs = query.all()
+        total_count = 0
+        for log in logs:
+            if log.history_data and len(log.history_data) > 0:
+                # Count each history_data entry
+                total_count += len(log.history_data)
+            else:
+                # If no history_data, count the log itself as 1 entry
+                total_count += 1
+        return total_count
+    else:
+        # Normal count of log records
+        return query.count()
+
+
+def get_vehicle_logs_with_blacklist_expanded(
+    db: Session,
+    company_id: int,
+    location_ids: List[int] = None,
+    checkpoint_ids: List[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    is_blacklisted: Optional[bool] = None,
+    is_whitelisted: Optional[bool] = None,
+    plate_number: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50
+):
+    """
+    Get vehicle logs with history_data expanded into separate rows (for plate number search).
+    Applies pagination AFTER expanding history_data entries.
+    
+    OPTIMIZED: Fetches all matching logs in one query, then expands and paginates in memory.
+    This is necessary because pagination must happen AFTER expansion when searching by plate_number.
+    
+    Args:
+        db: Database session
+        company_id: Company ID for blacklist check
+        location_ids: List of location IDs (None means all)
+        checkpoint_ids: List of checkpoint IDs (None means all)
+        start_date: Start date for filtering (None means no start limit)
+        end_date: End date for filtering (None means no end limit)
+        is_blacklisted: Filter by blacklisted status (None means all)
+        is_whitelisted: Filter by whitelisted status (None means all)
+        plate_number: Filter by vehicle plate number (None means all)
+        page: Page number (starts from 1)
+        page_size: Number of records per page
+        
+    Returns:
+        List of expanded history entries with pagination applied
+    """
+    from sqlalchemy import and_, cast, Integer, text
+    
+    # Build filter conditions
+    filters = []
+    
+    # IMPORTANT: Filter by location_id based on latest_data (not history_data)
+    # This ensures only logs from selected locations are returned
+    if location_ids is not None:
+        if len(location_ids) == 0:
+            # Empty list means no access - return empty list
+            return []
+        filters.append(TrnVehicleLog.location_id.in_(location_ids))
+    
+    if start_date:
+        start_datetime = datetime.combine(start_date, datetime.min.time())
+        filters.append(TrnVehicleLog.timestamp >= start_datetime)
+    if end_date:
+        end_datetime = datetime.combine(end_date, datetime.max.time())
+        filters.append(TrnVehicleLog.timestamp <= end_datetime)
+    
+    # Build query with all joins - fetch ALL matching logs
+    query = db.query(
+        TrnVehicleLog.log_id,
+        TrnVehicleLog.vehicle_id,
+        TrnVehicleLog.location_id,
+        TrnVehicleLog.timestamp,
+        TrnVehicleLog.first_seen,
+        TrnVehicleLog.last_seen,
+        TrnVehicleLog.latest_data,
+        TrnVehicleLog.history_data,
+        TrnVehicleLog.is_revised,
+        TrnVehicleLog.revised_data,
+        MstVehicle.plate_number,
+        MstLocation.location_name,
+        MstCheckpoint.checkpoint_id,
+        MstCheckpoint.name.label("checkpoint_name"),
+        MstWatchlist.is_blacklisted,
+        MstWatchlist.is_whitelisted
+    ).join(
+        MstVehicle, TrnVehicleLog.vehicle_id == MstVehicle.vehicle_id
+    ).outerjoin(
+        MstCheckpoint,
+        MstCheckpoint.checkpoint_id == cast(TrnVehicleLog.latest_data.op('->>')(text("'checkpoint_id'")), Integer)
+    ).outerjoin(
+        MstLocation, MstCheckpoint.location_id == MstLocation.location_id
+    ).outerjoin(
+        MstWatchlist,
+        and_(
+            TrnVehicleLog.vehicle_id == MstWatchlist.vehicle_id,
+            MstWatchlist.company_id == company_id,
+            MstWatchlist.is_deleted == False,
+            MstWatchlist.disabled == False
+        )
+    )
+    
+    # Apply plate number filter if provided
+    if plate_number:
+        plate_number_upper = plate_number.strip().upper()
+        filters.append(MstVehicle.plate_number == plate_number_upper)
+    
+    # Apply all filters at once
+    if filters:
+        query = query.filter(and_(*filters))
+    
+    # IMPORTANT: Filter by checkpoint (which filters by latest location, not first location)
+    if checkpoint_ids is not None:
+        if len(checkpoint_ids) == 0:
+            # Empty list means no access - return empty list
+            return []
+        # Filter by checkpoint_id from latest_data (via MstCheckpoint join)
+        query = query.filter(MstCheckpoint.checkpoint_id.in_(checkpoint_ids))
+    
+    # Apply watchlist filters if provided
+    if is_blacklisted is not None:
+        if is_blacklisted:
+            query = query.filter(MstWatchlist.is_blacklisted == True)
+        else:
+            query = query.filter(
+                (MstWatchlist.is_blacklisted == False) | (MstWatchlist.is_blacklisted.is_(None))
+            )
+    
+    if is_whitelisted is not None:
+        if is_whitelisted:
+            query = query.filter(MstWatchlist.is_whitelisted == True)
+        else:
+            query = query.filter(
+                (MstWatchlist.is_whitelisted == False) | (MstWatchlist.is_whitelisted.is_(None))
+            )
+    
+    # Order by timestamp and fetch ALL matching logs
+    query = query.order_by(TrnVehicleLog.timestamp.desc())
+    logs = query.all()
+    
+    # Expand history_data into separate entries
+    expanded_entries = []
+    for log in logs:
+        if log.history_data and len(log.history_data) > 0:
+            # Sort history_data by timestamp in ascending order
+            sorted_history = sorted(
+                log.history_data,
+                key=lambda x: x.get("Picture", {}).get("SnapInfo", {}).get("SnapTime", "")
+            )
+            
+            for idx, entry in enumerate(sorted_history):
+                expanded_entries.append({
+                    "log": log,
+                    "history_entry": entry,
+                    "detection_number": idx + 1,
+                    "total_detections": len(sorted_history)
+                })
+        else:
+            # If no history_data, use latest_data as single entry
+            expanded_entries.append({
+                "log": log,
+                "history_entry": log.latest_data if log.latest_data else {},
+                "detection_number": 1,
+                "total_detections": 1
+            })
+    
+    # Apply pagination to expanded entries
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_entries = expanded_entries[start_idx:end_idx]
+    
+    return paginated_entries
+
+
 def get_blacklisted_vehicles(db: Session, company_id: int) -> Dict[int, bool]:
     """
     Get blacklisted vehicles for a company.
@@ -317,5 +613,3 @@ def get_blacklisted_vehicles(db: Session, company_id: int) -> Dict[int, bool]:
         blacklist_map[entry.vehicle_id] = entry.is_blacklisted if entry.is_blacklisted is not None else False
     
     return blacklist_map
-
-
