@@ -10,6 +10,7 @@ import application.database
 
 # Import routers
 from application.auth.routes import router as auth_router
+from application.company.routes import router as company_router
 from application.edge.routes import router as edge_router
 from application.checkpoint.routes import router as checkpoint_router
 from application.dashboard.routes import router as dashboard_router
@@ -32,6 +33,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth_router)
+app.include_router(company_router)
 app.include_router(edge_router)
 app.include_router(checkpoint_router)
 app.include_router(dashboard_router)

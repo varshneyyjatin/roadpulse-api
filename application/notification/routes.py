@@ -119,6 +119,8 @@ def get_notifications(
         )
         
         result = []
+        image_paths = set()  # Collect all image paths
+        
         for notification, tracker in notifications:
             notification_obj = {
                 "notification_id": notification.notification_id,
@@ -138,13 +140,37 @@ def get_notifications(
             
             # Extract images from context_data for easier access
             if notification.context_data:
-                notification_obj["vehicle_image"] = notification.context_data.get("vehicle_image")
-                notification_obj["plate_image"] = notification.context_data.get("plate_image")
+                vehicle_image = notification.context_data.get("vehicle_image")
+                plate_image = notification.context_data.get("plate_image")
+                
+                notification_obj["vehicle_image"] = vehicle_image
+                notification_obj["plate_image"] = plate_image
+                
+                # Collect image paths for batch URL generation
+                if vehicle_image:
+                    image_paths.add(vehicle_image)
+                if plate_image:
+                    image_paths.add(plate_image)
             else:
                 notification_obj["vehicle_image"] = None
                 notification_obj["plate_image"] = None
             
             result.append(notification_obj)
+        
+        # Generate presigned URLs for all images in batch
+        from application.helpers.storage import get_storage
+        storage = get_storage()
+        presigned_urls = storage.generate_presigned_urls_batch(list(image_paths), expiration=3600)
+        
+        # Replace image paths with presigned URLs
+        for notification_obj in result:
+            vehicle_img = notification_obj.get("vehicle_image")
+            plate_img = notification_obj.get("plate_image")
+            
+            if vehicle_img:
+                notification_obj["vehicle_image"] = presigned_urls.get(vehicle_img)
+            if plate_img:
+                notification_obj["plate_image"] = presigned_urls.get(plate_img)
         
         logger.info(
             f"Get Notifications Success :: UserID -> {user_id} :: "
@@ -245,84 +271,78 @@ def get_my_notifications(
     is_read: Optional[bool] = None,
     notification_type: Optional[str] = None,
     limit: int = 50,
+    nav_notification: bool = False,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Get notifications for current user based on access control.
+    Get all notifications for current user (simplified - no access control for now).
     
     Query Parameters:
     - is_read: Filter by read status (optional)
     - notification_type: Filter by notification type (optional)
     - limit: Maximum number of results (default: 50)
+    - nav_notification: If true, returns minimal data (notification_type, title, message only)
     
-    Returns:
-    - User-specific notifications (user_id = current_user.id)
-    - Broadcast notifications for user's accessible locations (user_id = null, location_id in accessible locations)
-    - Filtered by access matrix (location-based access control)
+    Returns all notifications from MstNotification table for the user.
     """
-    from application.database.models.transactions.access_control import TrnAccessControl
-    import json
-    
     user_id = current_user.user_id
     company_id = current_user.company_id
     
-    logger.info(
-        f"My Notifications Request :: UserID -> {user_id} :: "
-        f"IsRead -> {is_read} :: Type -> {notification_type}"
-    )
+    logger.info(f"My Notifications :: UserID:{user_id} :: IsRead:{is_read} :: Type:{notification_type} :: Limit:{limit} :: NavMode:{nav_notification}")
     
     try:
-        # Get user's accessible location IDs from access control
-        access_entries = db.query(TrnAccessControl).filter(
-            TrnAccessControl.user_id == user_id,
-            TrnAccessControl.access_type == 'location',
-            TrnAccessControl.disabled == False,
-            TrnAccessControl.is_deleted == False
-        ).all()
-        
-        accessible_location_ids = []
-        has_all_locations_access = False
-        
-        for entry in access_entries:
-            # NULL access_data means access to all locations
-            if entry.access_data is None:
-                has_all_locations_access = True
-                break
+        # If nav_notification is true, get only latest 3 UNREAD notifications
+        if nav_notification:
+            # Force is_read=False for nav mode to get only unread
+            notifications = crud.get_user_notifications(
+                db=db,
+                user_id=user_id,
+                company_id=company_id,
+                is_read=False,  # Only unread notifications
+                notification_type=notification_type,
+                limit=3  # Only 3 latest
+            )
             
-            # Parse JSON and extract location IDs
-            try:
-                data = json.loads(entry.access_data) if isinstance(entry.access_data, str) else entry.access_data
-                access_ids = data.get('access_ids', []) if isinstance(data, dict) else []
-                accessible_location_ids.extend(access_ids)
-            except (json.JSONDecodeError, AttributeError, TypeError):
-                continue
+            result = []
+            for notification, tracker in notifications:
+                result.append({
+                    "notification_type": notification.notification_type,
+                    "title": notification.title,
+                    "message": notification.message
+                })
+            
+            # Get unread count for nav mode
+            filter_company_id = None if current_user.role == 'creator' else company_id
+            unread_count = crud.get_unread_count(
+                db=db,
+                user_id=user_id,
+                company_id=filter_company_id
+            )
+            
+            logger.info(f"My Notifications Success (Nav) :: UserID:{user_id} :: Count:{len(result)} :: Unread:{unread_count}")
+            
+            return {
+                "total": len(result),
+                "unread_count": unread_count,
+                "notifications": result
+            }
         
-        # Remove duplicates
-        accessible_location_ids = list(set(accessible_location_ids))
-        
-        logger.info(
-            f"Access Control Check :: UserID -> {user_id} :: "
-            f"AllLocations -> {has_all_locations_access} :: "
-            f"AccessibleLocations -> {accessible_location_ids}"
-        )
-        
-        # Get notifications with location-based filtering
-        # Creator can see all companies, others only their company
-        filter_company_id = None if current_user.role == 'creator' else company_id
-        
-        notifications = crud.get_user_notifications_with_access(
+        # Regular mode - get notifications based on filters
+        notifications = crud.get_user_notifications(
             db=db,
             user_id=user_id,
-            company_id=filter_company_id,
-            accessible_location_ids=accessible_location_ids,
-            has_all_locations_access=has_all_locations_access,
+            company_id=company_id,
             is_read=is_read,
             notification_type=notification_type,
             limit=limit
         )
         
         result = []
+        
+        # Full notification data with images
+        image_paths = set()  # Collect all image paths
+        
         for notification, tracker in notifications:
             notification_obj = {
                 "notification_id": notification.notification_id,
@@ -342,18 +362,39 @@ def get_my_notifications(
             
             # Extract images from context_data for easier access
             if notification.context_data:
-                notification_obj["vehicle_image"] = notification.context_data.get("vehicle_image")
-                notification_obj["plate_image"] = notification.context_data.get("plate_image")
+                vehicle_image = notification.context_data.get("vehicle_image")
+                plate_image = notification.context_data.get("plate_image")
+                
+                notification_obj["vehicle_image"] = vehicle_image
+                notification_obj["plate_image"] = plate_image
+                
+                # Collect image paths for batch URL generation
+                if vehicle_image:
+                    image_paths.add(vehicle_image)
+                if plate_image:
+                    image_paths.add(plate_image)
             else:
                 notification_obj["vehicle_image"] = None
                 notification_obj["plate_image"] = None
             
             result.append(notification_obj)
         
-        logger.info(
-            f"My Notifications Success :: UserID -> {user_id} :: "
-            f"Count -> {len(result)}"
-        )
+        # Generate presigned URLs for all images in batch
+        from application.helpers.storage import get_storage
+        storage = get_storage()
+        presigned_urls = storage.generate_presigned_urls_batch(list(image_paths), expiration=3600)
+        
+        # Replace image paths with presigned URLs
+        for notification_obj in result:
+            vehicle_img = notification_obj.get("vehicle_image")
+            plate_img = notification_obj.get("plate_image")
+            
+            if vehicle_img:
+                notification_obj["vehicle_image"] = presigned_urls.get(vehicle_img)
+            if plate_img:
+                notification_obj["plate_image"] = presigned_urls.get(plate_img)
+        
+        logger.info(f"My Notifications Success :: UserID:{user_id} :: Count:{len(result)}")
         
         return {
             "total": len(result),
@@ -361,7 +402,7 @@ def get_my_notifications(
         }
         
     except Exception as e:
-        logger.error(f"My Notifications Failed :: UserID -> {user_id} :: Error -> {str(e)}")
+        logger.error(f"My Notifications Failed :: UserID:{user_id} :: Error:{str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch notifications: {str(e)}"

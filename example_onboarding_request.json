@@ -1,0 +1,17 @@
+{
+  "company_code": "test",
+  "company_name": "Testing",
+  "company_email": "test@testing.com",
+  "company_phone": "9876543210",
+  "company_address": "Testing Office, India",
+  "data_retention_days": 90,
+  "locations": {
+    "count": 3,
+    "checkpoints_per_location": [2, 1, 2],
+    "cameras_per_checkpoint": [
+      [2, 1],
+      [1],
+      [1, 2]
+    ]
+  }
+}

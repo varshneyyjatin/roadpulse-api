@@ -17,6 +17,9 @@ class VehicleLogsRequest(BaseModel):
     is_blacklisted: Optional[bool] = Field(default=None, description="Filter by blacklisted vehicles (true/false/null for all)")
     is_whitelisted: Optional[bool] = Field(default=None, description="Filter by whitelisted vehicles (true/false/null for all)")
     plate_number: Optional[str] = Field(default=None, min_length=1, max_length=20, description="Search by vehicle plate number (for report scope)")
+    page: int = Field(default=1, ge=1, description="Page number (starts from 1)")
+    page_size: int = Field(default=50, ge=1, le=500, description="Number of records per page (1-500)")
+    excel_report: bool = Field(default=False, description="Generate Excel report (for report scope only)")
 
 class FixVehicleNumberRequest(BaseModel):
     record_id: int = Field(..., description="Vehicle log record ID")
