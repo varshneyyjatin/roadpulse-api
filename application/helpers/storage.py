@@ -48,6 +48,7 @@ class S3Storage:
                 ExpiresIn=expiration
             )
             logger.debug(f"Generated presigned URL :: Key -> {object_key}")
+            url = url.replace(f"http://{config.S3_HOST}:{config.S3_PORT}", config.S3_PUB_URL)
             return url
         except ClientError as e:
             logger.error(f"Error generating presigned URL :: Key -> {object_key} :: Error -> {str(e)}")
@@ -69,6 +70,7 @@ class S3Storage:
                 },
                 ExpiresIn=expiration
             )
+            url = url.replace(f"http://{config.S3_HOST}:{config.S3_PORT}", config.S3_PUB_URL)
             return (key, url)
         except Exception as e:
             logger.error(f"Error generating presigned URL :: Key -> {key} :: Error -> {str(e)}")
