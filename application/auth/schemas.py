@@ -23,3 +23,16 @@ class TokenData(BaseModel):
     email: Optional[str]
     role: str
     company_id: int
+
+class ForgotPasswordRequest(BaseModel):
+    """Forgot password request schema."""
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    """Reset password request schema."""
+    token: str
+    new_password: str
+
+class MessageResponse(BaseModel):
+    """Generic message response."""
+    message: str

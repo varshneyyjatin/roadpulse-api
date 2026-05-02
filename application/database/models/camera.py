@@ -26,6 +26,7 @@ class MstCamera(Base):
     camera_name = Column(String(200), nullable=True)
     camera_type = Column(String(50), index=True, nullable=True)
     camera_model = Column(String(100), nullable=True)
+    rtsp_path = Column(String(500), nullable=True)
     fps = Column(SmallInteger, nullable=True)
     ip_address = Column(String(45), index=True, nullable=True)
     username = Column(String(100), nullable=True)   

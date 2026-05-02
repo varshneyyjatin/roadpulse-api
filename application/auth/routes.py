@@ -1,10 +1,11 @@
 """
 API routes for user authentication.
 """
+import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from application.database.session import get_db
-from application.auth.schemas import UserLogin, TokenResponse
+from application.auth.schemas import UserLogin, TokenResponse, ForgotPasswordRequest, ResetPasswordRequest, MessageResponse
 from application.auth import crud
 from application.auth.utils import verify_password, create_access_token, get_current_user
 from application.helpers.logger import get_logger
@@ -358,3 +359,102 @@ def get_user_access_control(
             "total_compute_boxes": total_boxes
         }
     }
+
+@router.post("/forgot-password", response_model=MessageResponse)
+def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Initiate password reset process.
+    Generates a reset token and sends email to user.
+    """
+    # Check if user exists
+    db_user = crud.get_user_by_email(db, request.email)
+    
+    if not db_user:
+        logger.warning(f"Forgot Password :: Email -> {request.email} :: Status -> User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email address."
+        )
+    
+    # Check if user is disabled
+    if db_user.disabled:
+        logger.warning(f"Forgot Password :: Email -> {request.email} :: UserID -> {db_user.id} :: Status -> Account disabled")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is disabled. Please contact support."
+        )
+    
+    # Delete old tokens for this user
+    crud.delete_user_old_tokens(db, db_user.id)
+    
+    # Create new reset token
+    reset_token = crud.create_password_reset_token(db, db_user.id, expiry_hours=1)
+    
+    # Send email with reset link (synchronously to track success/failure)
+    from application.helpers.email import send_email
+    reset_link = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/reset-password?token={reset_token.token}"
+    
+    email_success, error_msg = send_email(
+        to_emails=[request.email],
+        subject="Password Reset Request - RoadPulse",
+        template_path="password_reset.html",
+        context={
+            "name": db_user.name,
+            "reset_link": reset_link,
+            "expiry_hours": 1
+        }
+    )
+    
+    if not email_success:
+        logger.error(f"Forgot Password :: Email -> {request.email} :: UserID -> {db_user.id} :: Status -> Email sending failed :: Error -> {error_msg}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="We're experiencing technical difficulties. Please try again in a few moments."
+        )
+    
+    logger.info(f"Forgot Password :: Email -> {request.email} :: UserID -> {db_user.id} :: Token -> {reset_token.token[:10]}... :: ExpiresAt -> {reset_token.expires_at} :: Status -> Email sent successfully")
+    
+    return MessageResponse(message="Password reset link has been sent to your email.")
+
+@router.post("/reset-password", response_model=MessageResponse)
+def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Reset user password using valid token.
+    Token must be valid, not expired, and not previously used.
+    """
+    # Validate token
+    db_token = crud.get_valid_reset_token(db, request.token)
+    
+    if not db_token:
+        logger.warning(f"Reset Password :: Token -> {request.token[:10]}... :: Status -> Invalid or expired token")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+    
+    # Get user
+    db_user = crud.get_user_by_id(db, db_token.user_id)
+    
+    if not db_user:
+        logger.error(f"Reset Password :: Token -> {request.token[:10]}... :: UserID -> {db_token.user_id} :: Status -> User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Hash new password
+    from application.auth.utils import hash_password
+    new_password_hash = hash_password(request.new_password)
+    
+    # Update password
+    db_user.password_hash = new_password_hash
+    db_user.updated_by = db_user.username
+    
+    # Mark token as used
+    crud.mark_token_as_used(db, db_token.id)
+    
+    db.commit()
+    
+    logger.info(f"Reset Password :: UserID -> {db_user.id} :: Username -> {db_user.username} :: Email -> {db_user.email} :: Status -> Password reset successful")
+    
+    return MessageResponse(message="Password has been reset successfully. You can now login with your new password.")
