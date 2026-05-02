@@ -8,10 +8,13 @@ from datetime import datetime
 class CameraConfigSchema(BaseModel):
     """Camera configuration with network details and ROI settings."""
     camera_id: int
+    device_id: str
     compute_box_id: int
     camera_ip_add: str
     box_ip_add: str
+    rtsp_path: Optional[str] = None
     roi: Optional[Dict] = None
+    loi: Optional[Dict] = None
     camera_name: str
     user_name: Optional[str] = None
     password: Optional[str] = None
