@@ -15,18 +15,18 @@ def get_vehicle_logs_by_locations_checkpoints(
     db: Session,
     location_ids: List[int] = None,
     checkpoint_ids: List[int] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None
+    start_date = None,
+    end_date = None
 ):
     """
-    Get vehicle logs filtered by locations, checkpoints, and date range.
+    Get vehicle logs filtered by locations, checkpoints, and date/datetime range.
     
     Args:
         db: Database session
         location_ids: List of location IDs (None means all)
         checkpoint_ids: List of checkpoint IDs (None means all)
-        start_date: Start date for filtering (None means no start limit)
-        end_date: End date for filtering (None means no end limit)
+        start_date: Start date or datetime for filtering (None means no start limit)
+        end_date: End date or datetime for filtering (None means no end limit)
         
     Returns:
         List of vehicle logs with related data
@@ -52,13 +52,19 @@ def get_vehicle_logs_by_locations_checkpoints(
     if location_ids is not None:
         query = query.filter(TrnVehicleLog.location_id.in_(location_ids))
     
-    # Filter by date range if provided
+    # Filter by date/datetime range if provided
     if start_date:
-        start_datetime = datetime.combine(start_date, datetime.min.time())
+        if isinstance(start_date, date) and not isinstance(start_date, datetime):
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+        else:
+            start_datetime = start_date
         query = query.filter(TrnVehicleLog.timestamp >= start_datetime)
     
     if end_date:
-        end_datetime = datetime.combine(end_date, datetime.max.time())
+        if isinstance(end_date, date) and not isinstance(end_date, datetime):
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+        else:
+            end_datetime = end_date
         query = query.filter(TrnVehicleLog.timestamp <= end_datetime)
     
     # Order by most recent first
@@ -72,8 +78,8 @@ def get_vehicle_logs_with_blacklist(
     company_id: int,
     location_ids: List[int] = None,
     checkpoint_ids: List[int] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    start_date = None,
+    end_date = None,
     is_blacklisted: Optional[bool] = None,
     is_whitelisted: Optional[bool] = None,
     plate_number: Optional[str] = None,
@@ -88,8 +94,8 @@ def get_vehicle_logs_with_blacklist(
         company_id: Company ID for blacklist check
         location_ids: List of location IDs (None means all)
         checkpoint_ids: List of checkpoint IDs (None means all)
-        start_date: Start date for filtering (None means no start limit)
-        end_date: End date for filtering (None means no end limit)
+        start_date: Start date or datetime for filtering (None means no start limit)
+        end_date: End date or datetime for filtering (None means no end limit)
         is_blacklisted: Filter by blacklisted status (None means all)
         is_whitelisted: Filter by whitelisted status (None means all)
         plate_number: Filter by vehicle plate number (None means all)
@@ -109,10 +115,16 @@ def get_vehicle_logs_with_blacklist(
     # Location filtering will be done via checkpoint_ids parameter
     
     if start_date:
-        start_datetime = datetime.combine(start_date, datetime.min.time())
+        if isinstance(start_date, date) and not isinstance(start_date, datetime):
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+        else:
+            start_datetime = start_date
         filters.append(TrnVehicleLog.timestamp >= start_datetime)
     if end_date:
-        end_datetime = datetime.combine(end_date, datetime.max.time())
+        if isinstance(end_date, date) and not isinstance(end_date, datetime):
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+        else:
+            end_datetime = end_date
         filters.append(TrnVehicleLog.timestamp <= end_datetime)
     
     # Single optimized query with all joins
@@ -204,8 +216,8 @@ def get_summary_counts(
     company_id: int,
     location_ids: List[int] = None,
     checkpoint_ids: List[int] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    start_date = None,
+    end_date = None,
     today_only: bool = True
 ):
     """
@@ -216,8 +228,8 @@ def get_summary_counts(
         company_id: Company ID for blacklist count
         location_ids: List of location IDs assigned to user (None means all)
         checkpoint_ids: List of checkpoint IDs assigned to user (None means all)
-        start_date: Start date for filtering vehicle logs
-        end_date: End date for filtering vehicle logs
+        start_date: Start date or datetime for filtering vehicle logs
+        end_date: End date or datetime for filtering vehicle logs
         today_only: Not used anymore, kept for compatibility
         
     Returns:
@@ -233,12 +245,18 @@ def get_summary_counts(
     # ===== BUILD FILTERS FOR DATE RANGE =====
     filters = []
     
-    # Date filters
+    # Date/datetime filters
     if start_date:
-        start_datetime = datetime.combine(start_date, datetime.min.time())
+        if isinstance(start_date, date) and not isinstance(start_date, datetime):
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+        else:
+            start_datetime = start_date
         filters.append(TrnVehicleLog.timestamp >= start_datetime)
     if end_date:
-        end_datetime = datetime.combine(end_date, datetime.max.time())
+        if isinstance(end_date, date) and not isinstance(end_date, datetime):
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+        else:
+            end_datetime = end_date
         filters.append(TrnVehicleLog.timestamp <= end_datetime)
     
     # Location filter
@@ -320,8 +338,8 @@ def get_vehicle_logs_count(
     company_id: int,
     location_ids: List[int] = None,
     checkpoint_ids: List[int] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    start_date = None,
+    end_date = None,
     is_blacklisted: Optional[bool] = None,
     is_whitelisted: Optional[bool] = None,
     plate_number: Optional[str] = None
@@ -335,8 +353,8 @@ def get_vehicle_logs_count(
         company_id: Company ID for blacklist check
         location_ids: List of location IDs (None means all)
         checkpoint_ids: List of checkpoint IDs (None means all)
-        start_date: Start date for filtering (None means no start limit)
-        end_date: End date for filtering (None means no end limit)
+        start_date: Start date or datetime for filtering (None means no start limit)
+        end_date: End date or datetime for filtering (None means no end limit)
         is_blacklisted: Filter by blacklisted status (None means all)
         is_whitelisted: Filter by whitelisted status (None means all)
         plate_number: Filter by vehicle plate number (None means all)
@@ -357,10 +375,16 @@ def get_vehicle_logs_count(
         filters.append(TrnVehicleLog.location_id.in_(location_ids))
     
     if start_date:
-        start_datetime = datetime.combine(start_date, datetime.min.time())
+        if isinstance(start_date, date) and not isinstance(start_date, datetime):
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+        else:
+            start_datetime = start_date
         filters.append(TrnVehicleLog.timestamp >= start_datetime)
     if end_date:
-        end_datetime = datetime.combine(end_date, datetime.max.time())
+        if isinstance(end_date, date) and not isinstance(end_date, datetime):
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+        else:
+            end_datetime = end_date
         filters.append(TrnVehicleLog.timestamp <= end_datetime)
     
     # Build count query with same filters as main query
@@ -429,8 +453,8 @@ def get_vehicle_logs_with_blacklist_expanded(
     company_id: int,
     location_ids: List[int] = None,
     checkpoint_ids: List[int] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    start_date = None,
+    end_date = None,
     is_blacklisted: Optional[bool] = None,
     is_whitelisted: Optional[bool] = None,
     plate_number: Optional[str] = None,
@@ -449,8 +473,8 @@ def get_vehicle_logs_with_blacklist_expanded(
         company_id: Company ID for blacklist check
         location_ids: List of location IDs (None means all)
         checkpoint_ids: List of checkpoint IDs (None means all)
-        start_date: Start date for filtering (None means no start limit)
-        end_date: End date for filtering (None means no end limit)
+        start_date: Start date or datetime for filtering (None means no start limit)
+        end_date: End date or datetime for filtering (None means no end limit)
         is_blacklisted: Filter by blacklisted status (None means all)
         is_whitelisted: Filter by whitelisted status (None means all)
         plate_number: Filter by vehicle plate number (None means all)
@@ -474,10 +498,16 @@ def get_vehicle_logs_with_blacklist_expanded(
         filters.append(TrnVehicleLog.location_id.in_(location_ids))
     
     if start_date:
-        start_datetime = datetime.combine(start_date, datetime.min.time())
+        if isinstance(start_date, date) and not isinstance(start_date, datetime):
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+        else:
+            start_datetime = start_date
         filters.append(TrnVehicleLog.timestamp >= start_datetime)
     if end_date:
-        end_datetime = datetime.combine(end_date, datetime.max.time())
+        if isinstance(end_date, date) and not isinstance(end_date, datetime):
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+        else:
+            end_datetime = end_date
         filters.append(TrnVehicleLog.timestamp <= end_datetime)
     
     # Build query with all joins - fetch ALL matching logs
