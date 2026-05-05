@@ -1,9 +1,46 @@
 from logging.config import fileConfig
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
-from ..application.database.base import Base
+from application.database.base import Base
 from alembic import context
+
+# Import all models so alembic can detect them
+from application.database.models.user import MstUser
+from application.database.models.company import MstCompany
+from application.database.models.location import MstLocation
+from application.database.models.checkpoint import MstCheckpoint
+from application.database.models.camera import MstCamera
+from application.database.models.compute_box import MstComputeBox
+from application.database.models.vehicle import MstVehicle
+from application.database.models.driver import MstDriver
+from application.database.models.watchlist import MstWatchlist
+from application.database.models.alert import MstAlert
+from application.database.models.notification import MstNotification
+from application.database.models.tab import MstTab
+from application.database.models.component import MstComponent
+from application.database.models.transactions.access_control import TrnAccessControl
+from application.database.models.transactions.device_health import TrnDeviceHealth
+from application.database.models.transactions.global_feature_launch import TrnGlobalLaunch
+from application.database.models.transactions.location_compute_box_history import (
+    TrnComputeBoxLocationHistory,
+)
+from application.database.models.transactions.notification_tracker import (
+    TrnNotificationTracker,
+)
+from application.database.models.transactions.subscription import (
+    TrnSubscription,
+    TrnSubscriptionHistory,
+)
+from application.database.models.transactions.vehicle_log import TrnVehicleLog
+from application.database.models.transactions.password_reset_token import (
+    TrnPasswordResetToken,
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

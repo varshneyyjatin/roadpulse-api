@@ -23,6 +23,7 @@ REDIS_PASS = os.getenv("REDIS_PASS", "")
 KEY_PREFIX = os.getenv("KEY_PREFIX", "app")
 
 # S3/MinIO Configuration
+S3_PUB_URL = os.getenv("S3_PUB_URL", "localhost")
 S3_HOST = os.getenv("S3_HOST", "localhost")
 S3_PORT = os.getenv("S3_PORT", "9000")
 S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
