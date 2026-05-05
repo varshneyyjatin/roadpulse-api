@@ -1,13 +1,15 @@
 """
 API routes for dashboard.
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body, BackgroundTasks
 from fastapi.responses import StreamingResponse
+from sqlalchemy import desc, cast, Integer, text
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone, date
 from application.database.session import get_db
 from application.auth.utils import get_current_user
 from application.dashboard import crud, utils, schemas
+from application.database.models.vehicle import MstVehicle
 from application.database.models.transactions.access_control import TrnAccessControl
 from application.database.models.transactions.vehicle_log import TrnVehicleLog
 from application.database.models.checkpoint import MstCheckpoint
@@ -22,6 +24,7 @@ from PIL import Image as PILImage
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from rapidfuzz import fuzz
 
 logger = get_logger("dashboard")
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -973,3 +976,130 @@ def fix_vehicle_number(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fix vehicle number: {str(e)}"
         )
+    
+
+@router.get("/similar-vehicles")
+def get_similar_vehicles(
+    plate: str,
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_id = current_user.user_id
+
+    logger.info(
+        f"Similar Vehicles API :: User:{user_id}({current_user.username}) :: "
+        f"Co:{current_user.company_id} :: Role:{current_user.role} :: Plate:{plate}"
+    )
+
+    access_entries = db.query(TrnAccessControl).filter(
+        TrnAccessControl.user_id == user_id,
+        TrnAccessControl.disabled == False,
+        TrnAccessControl.is_deleted == False
+    ).all()
+
+    if not access_entries:
+        logger.warning(
+            f"Similar Vehicles Request :: UserID -> {user_id} :: "
+            "Reason -> No access control entries found"
+        )
+        return {
+            100: [],
+            75: [],
+            50: [],
+            25: []
+        }
+
+    access_info = utils.extract_accessible_locations_checkpoints(
+        access_entries,
+        db=db,
+        company_id=current_user.company_id,
+        role=current_user.role
+    )
+    location_ids = access_info["location_ids"]
+    checkpoint_ids = access_info["checkpoint_ids"]
+
+    logger.info(f"Similar Vehicles Access Control :: UserLocs:{location_ids} :: UserCPs:{checkpoint_ids}")
+
+    buckets = {
+        100: [],
+        75: [],
+        50: [],
+        25: []
+    }
+
+    log_query = db.query(
+        TrnVehicleLog,
+        MstVehicle,
+        MstLocation,
+        MstCheckpoint
+    ).join(
+        MstVehicle,
+        MstVehicle.vehicle_id == TrnVehicleLog.vehicle_id
+    ).outerjoin(
+        MstLocation,
+        MstLocation.location_id == TrnVehicleLog.location_id
+    ).outerjoin(
+        MstCheckpoint,
+        MstCheckpoint.checkpoint_id == cast(TrnVehicleLog.latest_data.op('->>')(text("'checkpoint_id'")), Integer)
+    ).filter(
+        MstVehicle.is_deleted == False,
+        MstVehicle.disabled == False,
+        TrnVehicleLog.last_seen != None
+    )
+
+    if location_ids is not None:
+        if len(location_ids) == 0:
+            return buckets
+        log_query = log_query.filter(TrnVehicleLog.location_id.in_(location_ids))
+
+    if checkpoint_ids is not None:
+        if len(checkpoint_ids) == 0:
+            return buckets
+        log_query = log_query.filter(MstCheckpoint.checkpoint_id.in_(checkpoint_ids))
+
+    authorized_logs = log_query.order_by(
+        TrnVehicleLog.vehicle_id.asc(),
+        desc(TrnVehicleLog.last_seen)
+    ).all()
+
+    latest_logs_by_vehicle = {}
+    for log, vehicle, location, checkpoint in authorized_logs:
+        if vehicle.vehicle_id not in latest_logs_by_vehicle:
+            latest_logs_by_vehicle[vehicle.vehicle_id] = (log, vehicle, location, checkpoint)
+
+    normalized_plate = plate.strip().upper()
+
+    for log, vehicle, location, checkpoint in latest_logs_by_vehicle.values():
+        raw_similarity = fuzz.ratio(normalized_plate, vehicle.plate_number)
+
+        vehicle_data = {
+            "plate_number": vehicle.plate_number,
+            "similarity": raw_similarity,
+            "vehicle_type": vehicle.vehicle_type,
+            "location": location.location_name if location else None,
+            "checkpoint": checkpoint.name if checkpoint else None,
+            "last_seen": log.last_seen.isoformat() if log.last_seen else None
+        }
+
+        if raw_similarity >= 90:
+            buckets[100].append(vehicle_data)
+            buckets[75].append(vehicle_data)
+            buckets[50].append(vehicle_data)
+            buckets[25].append(vehicle_data)
+
+        elif raw_similarity >= 75:
+            buckets[75].append(vehicle_data)
+            buckets[50].append(vehicle_data)
+            buckets[25].append(vehicle_data)
+
+        elif raw_similarity >= 50:
+            buckets[50].append(vehicle_data)
+            buckets[25].append(vehicle_data)
+
+        elif raw_similarity >= 25:
+            buckets[25].append(vehicle_data)
+
+    for key in buckets:
+        buckets[key].sort(key=lambda x: x["similarity"], reverse=True)
+
+    return buckets
