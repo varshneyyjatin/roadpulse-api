@@ -61,8 +61,13 @@ def _coerce_end(value: date | datetime | None) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
+        # If it's a datetime at midnight, treat it as a date and add 1 day
+        if value.time() == _MIDNIGHT:
+            return datetime.combine(value.date() + timedelta(days=1), _MIDNIGHT)
+        # Otherwise it's a specific time, return as-is
         return value
-    return datetime.combine(value, _END_OF_DAY)
+    # Plain date object - add 1 day to include all records on the end_date
+    return datetime.combine(value + timedelta(days=1), _MIDNIGHT)
 
 def _resolve_date_window(
     request: schemas.VehicleLogsRequest,

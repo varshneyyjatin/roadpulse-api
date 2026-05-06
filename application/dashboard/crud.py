@@ -2,7 +2,7 @@
 CRUD operations for dashboard.
 """
 from typing import List, Optional, Dict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session
 from application.database.models.transactions.vehicle_log import TrnVehicleLog
 from application.database.models.vehicle import MstVehicle
@@ -62,10 +62,12 @@ def get_vehicle_logs_by_locations_checkpoints(
     
     if end_date:
         if isinstance(end_date, date) and not isinstance(end_date, datetime):
-            end_datetime = datetime.combine(end_date, datetime.max.time())
+            # Add 1 day and use < instead of <= to include all of end_date
+            end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+            query = query.filter(TrnVehicleLog.timestamp < end_datetime)
         else:
-            end_datetime = end_date
-        query = query.filter(TrnVehicleLog.timestamp <= end_datetime)
+            # For datetime objects, use < (routes.py already added 1 day for date inputs)
+            query = query.filter(TrnVehicleLog.timestamp < end_date)
     
     # Order by most recent first
     query = query.order_by(TrnVehicleLog.last_seen.desc())
@@ -122,10 +124,12 @@ def get_vehicle_logs_with_blacklist(
         filters.append(TrnVehicleLog.timestamp >= start_datetime)
     if end_date:
         if isinstance(end_date, date) and not isinstance(end_date, datetime):
-            end_datetime = datetime.combine(end_date, datetime.max.time())
+            # Add 1 day and use < instead of <= to include all of end_date
+            end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+            filters.append(TrnVehicleLog.timestamp < end_datetime)
         else:
-            end_datetime = end_date
-        filters.append(TrnVehicleLog.timestamp <= end_datetime)
+            # For datetime objects, use < (routes.py already added 1 day for date inputs)
+            filters.append(TrnVehicleLog.timestamp < end_date)
     
     # Single optimized query with all joins
     from sqlalchemy import cast, Integer, text
@@ -254,10 +258,12 @@ def get_summary_counts(
         filters.append(TrnVehicleLog.timestamp >= start_datetime)
     if end_date:
         if isinstance(end_date, date) and not isinstance(end_date, datetime):
-            end_datetime = datetime.combine(end_date, datetime.max.time())
+            # Add 1 day and use < instead of <= to include all of end_date
+            end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+            filters.append(TrnVehicleLog.timestamp < end_datetime)
         else:
-            end_datetime = end_date
-        filters.append(TrnVehicleLog.timestamp <= end_datetime)
+            # For datetime objects, use < (routes.py already added 1 day for date inputs)
+            filters.append(TrnVehicleLog.timestamp < end_date)
     
     # Location filter
     if location_ids is not None:
@@ -382,10 +388,12 @@ def get_vehicle_logs_count(
         filters.append(TrnVehicleLog.timestamp >= start_datetime)
     if end_date:
         if isinstance(end_date, date) and not isinstance(end_date, datetime):
-            end_datetime = datetime.combine(end_date, datetime.max.time())
+            # Add 1 day and use < instead of <= to include all of end_date
+            end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+            filters.append(TrnVehicleLog.timestamp < end_datetime)
         else:
-            end_datetime = end_date
-        filters.append(TrnVehicleLog.timestamp <= end_datetime)
+            # For datetime objects, use < (routes.py already added 1 day for date inputs)
+            filters.append(TrnVehicleLog.timestamp < end_date)
     
     # Build count query with same filters as main query
     query = db.query(TrnVehicleLog).join(
@@ -505,10 +513,12 @@ def get_vehicle_logs_with_blacklist_expanded(
         filters.append(TrnVehicleLog.timestamp >= start_datetime)
     if end_date:
         if isinstance(end_date, date) and not isinstance(end_date, datetime):
-            end_datetime = datetime.combine(end_date, datetime.max.time())
+            # Add 1 day and use < instead of <= to include all of end_date
+            end_datetime = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+            filters.append(TrnVehicleLog.timestamp < end_datetime)
         else:
-            end_datetime = end_date
-        filters.append(TrnVehicleLog.timestamp <= end_datetime)
+            # For datetime objects, use < (routes.py already added 1 day for date inputs)
+            filters.append(TrnVehicleLog.timestamp < end_date)
     
     # Build query with all joins - fetch ALL matching logs
     query = db.query(
@@ -587,10 +597,11 @@ def get_vehicle_logs_with_blacklist_expanded(
     expanded_entries = []
     for log in logs:
         if log.history_data and len(log.history_data) > 0:
-            # Sort history_data by timestamp in ascending order
+            # Sort history_data by timestamp in descending order (latest first)
             sorted_history = sorted(
                 log.history_data,
-                key=lambda x: x.get("Picture", {}).get("SnapInfo", {}).get("SnapTime", "")
+                key=lambda x: x.get("Picture", {}).get("SnapInfo", {}).get("SnapTime", ""),
+                reverse=True
             )
             
             for idx, entry in enumerate(sorted_history):
